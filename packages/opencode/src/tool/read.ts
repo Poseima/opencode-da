@@ -6,7 +6,7 @@ import { LSP } from "../lsp"
 import { FileTime } from "../file/time"
 import DESCRIPTION from "./read.txt"
 import { Filesystem } from "../util/filesystem"
-import { Instance } from "../project/instance"
+import { Instance, getEffectiveDirectory } from "../project/instance"
 import { Identifier } from "../id/id"
 import { Permission } from "../permission"
 import { Agent } from "@/agent/agent"
@@ -30,7 +30,7 @@ export const ReadTool = Tool.define("read", {
     const title = path.relative(Instance.worktree, filepath)
     const agent = await Agent.get(ctx.agent)
 
-    if (!ctx.extra?.["bypassCwdCheck"] && !Filesystem.contains(Instance.directory, filepath)) {
+    if (!ctx.extra?.["bypassCwdCheck"] && !Filesystem.contains(getEffectiveDirectory(), filepath)) {
       const parentDir = path.dirname(filepath)
       if (agent.permission.external_directory === "ask") {
         await Permission.ask({

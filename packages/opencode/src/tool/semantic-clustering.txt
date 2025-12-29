@@ -1,0 +1,59 @@
+LLM-powered Semantic Clustering & Label Generation Tool (语义打标工具).
+
+PURPOSE: Generate semantic cluster labels WITHOUT hierarchical structure for text data through deep LLM understanding.
+Best for: unique values < 300, requires deep semantic understanding of content.
+
+WHEN TO USE:
+- Target column has "Low Cohesiveness" (many diverse values needing standardization)
+- Analytical objective explicitly requires semantic clustering or classification
+- Need meaningful, business-oriented labels derived from content semantics
+
+WHEN NOT TO USE:
+- When you requires hierarchical structure in the labels. please run multiple tool calls independently if you really need it.
+- Target column has "High Cohesiveness" (already clean, standardized values)
+- Simple keyword matching would suffice (use keyword_clustering instead for speed)
+- unique values >= 300 (consider keyword_clustering for better performance)
+
+WHAT IT DOES:
+- Performs two-stage LLM processing: sample-based clustering → full dataset classification
+- Generates non-overlapping semantic cluster labels with definitions
+- Supports multi-label classification (one item can belong to multiple clusters)
+- Single-layer labels only; for multi-dimension/hierarchical labels, call multiple times
+
+OUTPUT FILES (2 files per call):
+1. {{outputFile}}: Detail table with columns [clusterColumns, outputLabelColumn, user_id]
+2. {{outputFile}}_语义工具标签定义.csv: Label definitions [cluster_tagline, cluster_definition]
+
+CRITICAL BEHAVIORS:
+- Multi-label items are EXPLODED (one row becomes multiple rows). Use user_id to join back to original data.
+- Empty responses marked as "受访者未回答", non-empty unclassified marked as "其他"
+
+Parameters:
+- clusterObjective: The clustering goal
+- inputFile: Input CSV or Excel file path
+- clusterColumns: Column names to cluster on
+- outputFile: Output CSV or Excel file path
+- outputLabelColumn: Column name for output cluster labels
+- additionalRequirements: (Optional) Additional clustering requirements
+- preDefinedCategories: (Optional) Pre-defined categories - see detailed section below
+
+PRE-DEFINED CATEGORIES (preDefinedCategories):
+Use to constrain clustering to specific labels instead of letting LLM generate them.
+
+Scenarios:
+1. Labels + Definitions provided:
+   - LLM Stage 1 SKIPPED (no clustering)
+   - Your definitions used directly for classification
+   - Fastest option when you know exact categories
+
+2. Labels only (no definitions):
+   - LLM Stage 1 runs to GENERATE definitions
+   - LLM analyzes sample data to create contextual definitions
+   - Use when you want specific labels but need semantic definitions
+
+Example:
+preDefinedCategories: [
+  { label: "产品质量", definition: "关于产品质量、做工、材料的反馈" },
+  { label: "价格", definition: "关于价格、性价比、价位的反馈" },
+  { label: "服务", definition: "关于客服、服务态度的反馈" }
+]

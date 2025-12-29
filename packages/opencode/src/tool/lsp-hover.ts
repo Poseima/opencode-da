@@ -3,7 +3,7 @@ import { Tool } from "./tool"
 import path from "path"
 import { LSP } from "../lsp"
 import DESCRIPTION from "./lsp-hover.txt"
-import { Instance } from "../project/instance"
+import { Instance, getEffectiveDirectory } from "../project/instance"
 
 export const LspHoverTool = Tool.define("lsp_hover", {
   description: DESCRIPTION,
@@ -13,7 +13,7 @@ export const LspHoverTool = Tool.define("lsp_hover", {
     character: z.number().describe("The character number to get diagnostics."),
   }),
   execute: async (args) => {
-    const file = path.isAbsolute(args.file) ? args.file : path.join(Instance.directory, args.file)
+    const file = path.isAbsolute(args.file) ? args.file : path.join(getEffectiveDirectory(), args.file)
     await LSP.touchFile(file, true)
     const result = await LSP.hover({
       ...args,

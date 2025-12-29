@@ -3,7 +3,7 @@ import { Tool } from "./tool"
 import { Ripgrep } from "../file/ripgrep"
 
 import DESCRIPTION from "./grep.txt"
-import { Instance } from "../project/instance"
+import { Instance, getEffectiveDirectory } from "../project/instance"
 
 const MAX_LINE_LENGTH = 2000
 
@@ -19,7 +19,7 @@ export const GrepTool = Tool.define("grep", {
       throw new Error("pattern is required")
     }
 
-    const searchPath = params.path || Instance.directory
+    const searchPath = params.path || getEffectiveDirectory()
 
     const rgPath = await Ripgrep.filepath()
     const args = ["-nH", "--field-match-separator=|", "--regexp", params.pattern]

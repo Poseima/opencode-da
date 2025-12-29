@@ -572,6 +572,58 @@ export function Prompt(props: PromptProps) {
         command: inputText,
       })
       setStore("mode", "normal")
+    } else if (inputText.startsWith("/conda_env ")) {
+      // Handle /conda_env command
+      const envName = inputText.slice("/conda_env ".length).trim()
+      if (!envName) {
+        toast.show({ variant: "warning", message: "Usage: /conda_env <environment_name>" })
+      } else {
+        try {
+          const response = await fetch(`${sdk.url}/config/conda-env`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: envName }),
+          })
+          if (response.ok) {
+            const result = await response.json()
+            toast.show({ variant: "success", message: `Conda environment set: ${result.python_path}` })
+          } else {
+            const error = await response.json()
+            toast.show({ variant: "error", message: error.message || `Environment '${envName}' not found` })
+          }
+        } catch (e) {
+          toast.show({ variant: "error", message: e instanceof Error ? e.message : "Unknown error" })
+        }
+      }
+      input.clear()
+      setStore("prompt", { input: "", parts: [] })
+      return
+    } else if (inputText.startsWith("/switch_base ")) {
+      // Handle /switch_base command
+      const newPath = inputText.slice("/switch_base ".length).trim()
+      if (!newPath) {
+        toast.show({ variant: "warning", message: "Usage: /switch_base <absolute_path>" })
+      } else {
+        try {
+          const response = await fetch(`${sdk.url}/config/switch-base`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: newPath }),
+          })
+          if (response.ok) {
+            const result = await response.json()
+            toast.show({ variant: "success", message: `Base directory switched to: ${result.path}` })
+          } else {
+            const error = await response.json()
+            toast.show({ variant: "error", message: error.message || `Failed to switch to '${newPath}'` })
+          }
+        } catch (e) {
+          toast.show({ variant: "error", message: e instanceof Error ? e.message : "Unknown error" })
+        }
+      }
+      input.clear()
+      setStore("prompt", { input: "", parts: [] })
+      return
     } else if (
       inputText.startsWith("/") &&
       iife(() => {
@@ -783,6 +835,7 @@ export function Prompt(props: PromptProps) {
               minHeight={1}
               maxHeight={6}
               onContentChange={() => {
+                if (props.disabled) return // Block text input when disabled
                 const value = input.plainText
                 setStore("prompt", "input", value)
                 autocomplete.onInput(value)
@@ -791,7 +844,8 @@ export function Prompt(props: PromptProps) {
               keyBindings={textareaKeybindings()}
               onKeyDown={async (e) => {
                 if (props.disabled) {
-                  e.preventDefault()
+                  // Don't preventDefault - let events propagate to other handlers
+                  // (e.g., for permission/user-question keyboard handling)
                   return
                 }
                 // Handle clipboard paste (Ctrl+V) - check for images first on Windows

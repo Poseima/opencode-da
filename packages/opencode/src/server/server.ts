@@ -21,6 +21,7 @@ import { Format } from "../format"
 import { MessageV2 } from "../session/message-v2"
 import { TuiRoute } from "./tui"
 import { Permission } from "../permission"
+import { UserQuestion } from "../user-question"
 import { Instance } from "../project/instance"
 import { Vcs } from "../project/vcs"
 import { Agent } from "../agent/agent"
@@ -445,6 +446,96 @@ export namespace Server {
           const config = c.req.valid("json")
           await Config.update(config)
           return c.json(config)
+        },
+      )
+      .post(
+        "/config/conda-env",
+        describeRoute({
+          summary: "Set conda environment",
+          description: "Detect a conda environment by name and set its Python interpreter path in the configuration.",
+          operationId: "config.condaEnv",
+          responses: {
+            200: {
+              description: "Conda environment set successfully",
+              content: {
+                "application/json": {
+                  schema: resolver(
+                    z.object({
+                      success: z.literal(true),
+                      python_path: z.string(),
+                      env_name: z.string(),
+                    }),
+                  ),
+                },
+              },
+            },
+            ...errors(400, 404),
+          },
+        }),
+        validator("json", z.object({ name: z.string() })),
+        async (c) => {
+          const { name } = c.req.valid("json")
+          const { detectCondaEnv } = await import("../util/conda")
+          const pythonPath = await detectCondaEnv(name)
+          if (!pythonPath) {
+            throw new Storage.NotFoundError({ message: `Conda environment '${name}' not found` })
+          }
+          await Config.update({ python_path: pythonPath })
+          return c.json({ success: true as const, python_path: pythonPath, env_name: name })
+        },
+      )
+      .post(
+        "/config/switch-base",
+        describeRoute({
+          summary: "Switch base directory",
+          description: "Change the base working directory for tools (session-only, resets on restart).",
+          operationId: "config.switchBase",
+          responses: {
+            200: {
+              description: "Base directory switched successfully",
+              content: {
+                "application/json": {
+                  schema: resolver(
+                    z.object({
+                      success: z.literal(true),
+                      path: z.string(),
+                    }),
+                  ),
+                },
+              },
+            },
+            ...errors(400, 404),
+          },
+        }),
+        validator("json", z.object({ path: z.string() })),
+        async (c) => {
+          const { path: newPath } = c.req.valid("json")
+          const fs = await import("fs/promises")
+          const pathModule = await import("path")
+
+          // Validate path is absolute
+          if (!pathModule.isAbsolute(newPath)) {
+            throw new NamedError.Unknown({ message: `Path must be absolute: ${newPath}` })
+          }
+
+          // Check path exists and is a directory
+          try {
+            const stat = await fs.stat(newPath)
+            if (!stat.isDirectory()) {
+              throw new NamedError.Unknown({ message: `Path is not a directory: ${newPath}` })
+            }
+          } catch (e) {
+            if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+              throw new Storage.NotFoundError({ message: `Directory not found: ${newPath}` })
+            }
+            throw e
+          }
+
+          // Set the base path override
+          const { setBasePathOverride } = await import("../project/instance")
+          setBasePathOverride(newPath)
+
+          return c.json({ success: true as const, path: newPath })
         },
       )
       .get(
@@ -1524,6 +1615,76 @@ export namespace Server {
             sessionID,
             permissionID,
             response: c.req.valid("json").response,
+          })
+          return c.json(true)
+        },
+      )
+      .post(
+        "/session/:sessionID/userquestion/:questionID/respond",
+        describeRoute({
+          summary: "Respond to user question",
+          description: "Submit answers to a user question from the AI assistant.",
+          operationId: "userquestion.respond",
+          responses: {
+            200: {
+              description: "Response processed successfully",
+              content: {
+                "application/json": {
+                  schema: resolver(z.boolean()),
+                },
+              },
+            },
+            ...errors(400, 404),
+          },
+        }),
+        validator(
+          "param",
+          z.object({
+            sessionID: z.string(),
+            questionID: z.string(),
+          }),
+        ),
+        validator("json", z.object({ answers: UserQuestion.Answer.array() })),
+        async (c) => {
+          const params = c.req.valid("param")
+          UserQuestion.respond({
+            id: params.questionID,
+            sessionID: params.sessionID,
+            answers: c.req.valid("json").answers,
+          })
+          return c.json(true)
+        },
+      )
+      .post(
+        "/session/:sessionID/userquestion/:questionID/cancel",
+        describeRoute({
+          summary: "Cancel user question",
+          description: "Cancel a user question, allowing the AI assistant to proceed without answers.",
+          operationId: "userquestion.cancel",
+          responses: {
+            200: {
+              description: "Question cancelled successfully",
+              content: {
+                "application/json": {
+                  schema: resolver(z.boolean()),
+                },
+              },
+            },
+            ...errors(400, 404),
+          },
+        }),
+        validator(
+          "param",
+          z.object({
+            sessionID: z.string(),
+            questionID: z.string(),
+          }),
+        ),
+        async (c) => {
+          const params = c.req.valid("param")
+          UserQuestion.cancel({
+            id: params.questionID,
+            sessionID: params.sessionID,
           })
           return c.json(true)
         },

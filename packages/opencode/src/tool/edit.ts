@@ -14,7 +14,7 @@ import { File } from "../file"
 import { Bus } from "../bus"
 import { FileTime } from "../file/time"
 import { Filesystem } from "../util/filesystem"
-import { Instance } from "../project/instance"
+import { Instance, getEffectiveDirectory } from "../project/instance"
 import { Agent } from "../agent/agent"
 import { Snapshot } from "@/snapshot"
 
@@ -43,8 +43,9 @@ export const EditTool = Tool.define("edit", {
 
     const agent = await Agent.get(ctx.agent)
 
-    const filePath = path.isAbsolute(params.filePath) ? params.filePath : path.join(Instance.directory, params.filePath)
-    if (!Filesystem.contains(Instance.directory, filePath)) {
+    const effectiveDir = getEffectiveDirectory()
+    const filePath = path.isAbsolute(params.filePath) ? params.filePath : path.join(effectiveDir, params.filePath)
+    if (!Filesystem.contains(effectiveDir, filePath)) {
       const parentDir = path.dirname(filePath)
       if (agent.permission.external_directory === "ask") {
         await Permission.ask({

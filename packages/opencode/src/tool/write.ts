@@ -8,7 +8,7 @@ import { Bus } from "../bus"
 import { File } from "../file"
 import { FileTime } from "../file/time"
 import { Filesystem } from "../util/filesystem"
-import { Instance } from "../project/instance"
+import { Instance, getEffectiveDirectory } from "../project/instance"
 import { Agent } from "../agent/agent"
 
 const MAX_DIAGNOSTICS_PER_FILE = 20
@@ -23,8 +23,9 @@ export const WriteTool = Tool.define("write", {
   async execute(params, ctx) {
     const agent = await Agent.get(ctx.agent)
 
-    const filepath = path.isAbsolute(params.filePath) ? params.filePath : path.join(Instance.directory, params.filePath)
-    if (!Filesystem.contains(Instance.directory, filepath)) {
+    const effectiveDir = getEffectiveDirectory()
+    const filepath = path.isAbsolute(params.filePath) ? params.filePath : path.join(effectiveDir, params.filePath)
+    if (!Filesystem.contains(effectiveDir, filepath)) {
       const parentDir = path.dirname(filepath)
       if (agent.permission.external_directory === "ask") {
         await Permission.ask({

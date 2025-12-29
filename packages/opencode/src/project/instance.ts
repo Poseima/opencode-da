@@ -5,6 +5,22 @@ import { State } from "./state"
 import { iife } from "@/util/iife"
 import { GlobalBus } from "@/bus/global"
 
+// Runtime override for base path (session-only, not persisted)
+let basePathOverride: string | null = null
+
+export function setBasePathOverride(path: string | null) {
+  basePathOverride = path
+  Log.Default.info("base path override set", { path })
+}
+
+export function getBasePathOverride(): string | null {
+  return basePathOverride
+}
+
+export function getEffectiveDirectory(): string {
+  return basePathOverride || Instance.directory
+}
+
 interface Context {
   directory: string
   worktree: string

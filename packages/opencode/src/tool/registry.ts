@@ -24,6 +24,12 @@ import { CodeSearchTool } from "./codesearch"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
 import { LspTool } from "./lsp"
+import { LLMCalculatorTool } from "./llm-calculator"
+import { SemanticClusteringTool } from "./semantic-clustering"
+import { KeywordClusteringTool } from "./keyword-clustering"
+import { CityTaggingTool } from "./city-tagging"
+import { InitDataMetadataTool } from "./init-data-metadata"
+import { AskUserQuestionTool } from "./ask-user-question"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -104,6 +110,12 @@ export namespace ToolRegistry {
       WebSearchTool,
       CodeSearchTool,
       SkillTool,
+      LLMCalculatorTool,
+      SemanticClusteringTool,
+      KeywordClusteringTool,
+      CityTaggingTool,
+      InitDataMetadataTool,
+      AskUserQuestionTool,
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...custom,

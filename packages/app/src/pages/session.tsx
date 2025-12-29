@@ -349,6 +349,17 @@ export default function Page() {
         setActiveMessage(priorMsg)
       },
     },
+    {
+      id: "config.conda_env",
+      title: "Set conda environment",
+      description: "Set Python interpreter from conda env (type: /conda_env <name>)",
+      category: "Configuration",
+      slash: "conda_env",
+      onSelect: () => {
+        // This command requires an argument, so we just show usage hint
+        // The actual handling happens in prompt-input.tsx when user submits /conda_env <name>
+      },
+    },
   ])
 
   const handleKeyDown = (event: KeyboardEvent) => {

@@ -575,6 +575,8 @@ function App() {
     })
   })
 
+  // UserQuestion events are now handled inline in session/index.tsx (like permissions)
+
   return (
     <box
       width={dimensions().width}

@@ -6,6 +6,7 @@ import {
   For,
   Match,
   on,
+  onCleanup,
   Show,
   Switch,
   useContext,
@@ -68,6 +69,8 @@ import { Footer } from "./footer.tsx"
 import { usePromptRef } from "../../context/prompt"
 import { Filesystem } from "@/util/filesystem"
 import { DialogSubagent } from "./dialog-subagent.tsx"
+import type { UserQuestion } from "@/user-question"
+import { Log } from "@/util/log"
 
 addDefaultParsers(parsers.parsers)
 
@@ -91,6 +94,14 @@ const context = createContext<{
   userMessageMarkdown: () => boolean
   diffWrapMode: () => "word" | "none"
   sync: ReturnType<typeof useSync>
+  questionState: () => {
+    currentTab: number
+    focusedOption: number
+    customText: string
+    isTypingCustom: boolean
+    answers: Record<number, UserQuestion.Answer>
+  }
+  sessionID: string
 }>()
 
 function use() {
@@ -109,6 +120,56 @@ export function Session() {
   const session = createMemo(() => sync.session.get(route.sessionID)!)
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
   const permissions = createMemo(() => sync.data.permission[route.sessionID] ?? [])
+  const userQuestions = createMemo(() => sync.data.userQuestion[route.sessionID] ?? [])
+
+  // State for user question UI
+  const [questionState, setQuestionState] = createSignal({
+    currentTab: 0,
+    focusedOption: 0,
+    customText: "",
+    isTypingCustom: false,
+    answers: {} as Record<number, UserQuestion.Answer>,
+  })
+
+  // Debug: track userQuestions and permissions changes
+  createEffect(() => {
+    const uq = userQuestions()
+    const perm = permissions()
+    const showPrompt = perm.length === 0 && uq.length === 0
+    Log.Default.info("[SESSION] state changed", {
+      userQuestionsCount: uq.length,
+      permissionsCount: perm.length,
+      showPrompt,
+      firstQuestionId: uq[0]?.id,
+    })
+  })
+
+  // Debug: track questionState changes
+  createEffect(() => {
+    const state = questionState()
+    Log.Default.info("[SESSION] questionState changed", {
+      currentTab: state.currentTab,
+      focusedOption: state.focusedOption,
+      isTypingCustom: state.isTypingCustom,
+      answersCount: Object.keys(state.answers).length,
+    })
+  })
+
+  // Reset question state when a new question arrives
+  createEffect(
+    on(
+      () => userQuestions()[0]?.id,
+      () => {
+        setQuestionState({
+          currentTab: 0,
+          focusedOption: 0,
+          customText: "",
+          isTypingCustom: false,
+          answers: {},
+        })
+      },
+    ),
+  )
 
   const pending = createMemo(() => {
     return messages().findLast((x) => x.role === "assistant" && !x.time.completed)?.id
@@ -249,6 +310,14 @@ export function Session() {
   }
 
   useKeyboard((evt) => {
+    Log.Default.info("[SESSION] keypress", {
+      key: evt.name,
+      dialogStack: dialog.stack.length,
+      userQuestionsCount: userQuestions().length,
+      permissionsCount: permissions().length,
+      defaultPrevented: evt.defaultPrevented,
+    })
+
     if (dialog.stack.length > 0) return
 
     const first = permissions()[0]
@@ -267,6 +336,250 @@ export function Session() {
           sessionID: route.sessionID,
           response: response,
         })
+      }
+      return
+    }
+
+    // Handle user question keyboard input
+    const firstQuestion = userQuestions()[0]
+    Log.Default.info("[SESSION] firstQuestion check", {
+      hasFirstQuestion: !!firstQuestion,
+      key: evt.name
+    })
+    if (firstQuestion) {
+      // Note: Don't call evt.preventDefault() here - it blocks ALL keys including Ctrl+C
+      // Instead, we return after handling specific keys to prevent further processing
+      const state = questionState()
+      const currentQ = firstQuestion.questions[state.currentTab]
+      const totalTabs = firstQuestion.questions.length + 1 // +1 for submit tab
+      const isSubmitTab = state.currentTab === firstQuestion.questions.length
+      const optionsCount = currentQ ? currentQ.options.length + 1 : 0 // +1 for "Type something"
+      Log.Default.info("[SESSION] inside firstQuestion block", {
+        key: evt.name,
+        currentTab: state.currentTab,
+        focusedOption: state.focusedOption,
+        isSubmitTab,
+        totalTabs,
+        optionsCount,
+      })
+
+      // Handle custom text input mode
+      if (state.isTypingCustom) {
+        if (evt.name === "escape") {
+          setQuestionState((s) => ({ ...s, isTypingCustom: false }))
+          return
+        }
+        if (evt.name === "return") {
+          setQuestionState((s) => ({ ...s, isTypingCustom: false, currentTab: Math.min(s.currentTab + 1, totalTabs - 1) }))
+          return
+        }
+        if (evt.name === "backspace") {
+          setQuestionState((s) => {
+            const newText = s.customText.slice(0, -1)
+            const newAnswers = { ...s.answers }
+            if (currentQ) {
+              newAnswers[s.currentTab] = {
+                questionIndex: s.currentTab,
+                selectedIndices: newAnswers[s.currentTab]?.selectedIndices ?? [],
+                customText: newText || null,
+              }
+            }
+            return { ...s, customText: newText, answers: newAnswers }
+          })
+          return
+        }
+        if (evt.sequence && evt.sequence.length === 1 && !evt.ctrl && !evt.meta) {
+          setQuestionState((s) => {
+            const newText = s.customText + evt.sequence
+            const newAnswers = { ...s.answers }
+            if (currentQ) {
+              newAnswers[s.currentTab] = {
+                questionIndex: s.currentTab,
+                selectedIndices: newAnswers[s.currentTab]?.selectedIndices ?? [],
+                customText: newText,
+              }
+            }
+            return { ...s, customText: newText, answers: newAnswers }
+          })
+          return
+        }
+        return
+      }
+
+      // Normal navigation mode
+      if (evt.name === "escape") {
+        fetch(
+          `${sdk.url}/session/${route.sessionID}/userquestion/${firstQuestion.id}/cancel?directory=${encodeURIComponent(process.cwd())}`,
+          { method: "POST", headers: { "Content-Type": "application/json" } },
+        )
+        return
+      }
+
+      if (evt.name === "tab" || evt.name === "right") {
+        Log.Default.info("[SESSION] Tab/Right pressed - advancing tab", {
+          fromTab: state.currentTab,
+          toTab: Math.min(state.currentTab + 1, totalTabs - 1),
+        })
+        setQuestionState((s) => ({
+          ...s,
+          currentTab: Math.min(s.currentTab + 1, totalTabs - 1),
+          focusedOption: 0,
+          customText: s.answers[Math.min(s.currentTab + 1, totalTabs - 1)]?.customText || "",
+        }))
+        return
+      }
+
+      if ((evt.shift && evt.name === "tab") || evt.name === "left") {
+        Log.Default.info("[SESSION] Shift+Tab/Left pressed - going back tab", {
+          fromTab: state.currentTab,
+          toTab: Math.max(state.currentTab - 1, 0),
+          shift: evt.shift,
+        })
+        setQuestionState((s) => ({
+          ...s,
+          currentTab: Math.max(s.currentTab - 1, 0),
+          focusedOption: 0,
+          customText: s.answers[Math.max(s.currentTab - 1, 0)]?.customText || "",
+        }))
+        return
+      }
+
+      if (evt.name === "up" || (evt.ctrl && evt.name === "p")) {
+        Log.Default.info("[SESSION] Up pressed", { focusedOption: state.focusedOption, isSubmitTab })
+        if (isSubmitTab) {
+          // Toggle between Submit (0) and Cancel (1)
+          setQuestionState((s) => ({ ...s, focusedOption: s.focusedOption === 0 ? 1 : 0 }))
+        } else {
+          setQuestionState((s) => ({ ...s, focusedOption: s.focusedOption <= 0 ? optionsCount - 1 : s.focusedOption - 1 }))
+        }
+        return
+      }
+
+      if (evt.name === "down" || (evt.ctrl && evt.name === "n")) {
+        Log.Default.info("[SESSION] Down pressed", { focusedOption: state.focusedOption, isSubmitTab, optionsCount })
+        if (isSubmitTab) {
+          // Toggle between Submit (0) and Cancel (1)
+          setQuestionState((s) => ({ ...s, focusedOption: s.focusedOption === 0 ? 1 : 0 }))
+        } else {
+          setQuestionState((s) => ({ ...s, focusedOption: s.focusedOption >= optionsCount - 1 ? 0 : s.focusedOption + 1 }))
+        }
+        return
+      }
+
+      if (evt.name === "return") {
+        if (isSubmitTab) {
+          if (state.focusedOption === 1) {
+            // Cancel
+            fetch(
+              `${sdk.url}/session/${route.sessionID}/userquestion/${firstQuestion.id}/cancel?directory=${encodeURIComponent(process.cwd())}`,
+              { method: "POST", headers: { "Content-Type": "application/json" } },
+            )
+            return
+          }
+          // Submit answers (focusedOption === 0)
+          const answerList = Object.values(state.answers)
+          fetch(
+            `${sdk.url}/session/${route.sessionID}/userquestion/${firstQuestion.id}/respond?directory=${encodeURIComponent(process.cwd())}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ answers: answerList }),
+            },
+          )
+          return
+        }
+
+        // Check if focused on "Type something" option (last option)
+        if (state.focusedOption === optionsCount - 1) {
+          setQuestionState((s) => ({ ...s, isTypingCustom: true }))
+          return
+        }
+
+        // Toggle option selection
+        setQuestionState((s) => {
+          const newAnswers = { ...s.answers }
+          const current = newAnswers[s.currentTab] || {
+            questionIndex: s.currentTab,
+            selectedIndices: [],
+            customText: null,
+          }
+
+          let newIndices: number[]
+          if (currentQ?.multiSelect) {
+            if (current.selectedIndices.includes(s.focusedOption)) {
+              newIndices = current.selectedIndices.filter((i) => i !== s.focusedOption)
+            } else {
+              newIndices = [...current.selectedIndices, s.focusedOption]
+            }
+          } else {
+            newIndices = [s.focusedOption]
+          }
+
+          newAnswers[s.currentTab] = { ...current, selectedIndices: newIndices }
+
+          // Auto-advance for single select
+          if (!currentQ?.multiSelect) {
+            return {
+              ...s,
+              answers: newAnswers,
+              currentTab: Math.min(s.currentTab + 1, totalTabs - 1),
+              focusedOption: 0,
+              customText: newAnswers[Math.min(s.currentTab + 1, totalTabs - 1)]?.customText || "",
+            }
+          }
+
+          return { ...s, answers: newAnswers }
+        })
+        return
+      }
+
+      if (evt.name === "space" && !isSubmitTab) {
+        if (state.focusedOption === optionsCount - 1) {
+          setQuestionState((s) => ({ ...s, isTypingCustom: true }))
+          return
+        }
+
+        // Toggle for multi-select
+        if (currentQ?.multiSelect) {
+          setQuestionState((s) => {
+            const newAnswers = { ...s.answers }
+            const current = newAnswers[s.currentTab] || {
+              questionIndex: s.currentTab,
+              selectedIndices: [],
+              customText: null,
+            }
+
+            let newIndices: number[]
+            if (current.selectedIndices.includes(s.focusedOption)) {
+              newIndices = current.selectedIndices.filter((i) => i !== s.focusedOption)
+            } else {
+              newIndices = [...current.selectedIndices, s.focusedOption]
+            }
+
+            newAnswers[s.currentTab] = { ...current, selectedIndices: newIndices }
+            return { ...s, answers: newAnswers }
+          })
+        }
+        return
+      }
+
+      // Auto-enter typing mode when user types on the "Type something" option
+      if (!isSubmitTab && state.focusedOption === optionsCount - 1) {
+        if (evt.sequence && evt.sequence.length === 1 && !evt.ctrl && !evt.meta) {
+          setQuestionState((s) => {
+            const newText = s.customText + evt.sequence
+            const newAnswers = { ...s.answers }
+            if (currentQ) {
+              newAnswers[s.currentTab] = {
+                questionIndex: s.currentTab,
+                selectedIndices: newAnswers[s.currentTab]?.selectedIndices ?? [],
+                customText: newText,
+              }
+            }
+            return { ...s, isTypingCustom: true, customText: newText, answers: newAnswers }
+          })
+          return
+        }
       }
     }
   })
@@ -297,6 +610,17 @@ export function Session() {
   }
 
   const command = useCommandDialog()
+
+  // Suspend command keybinds when permissions or userQuestions pending
+  // This allows the session's keyboard handler to process Tab, Enter, etc.
+  // Using onCleanup ensures keybinds true/false calls are always paired correctly
+  createEffect(() => {
+    const hasPending = permissions().length > 0 || userQuestions().length > 0
+    if (!hasPending) return // Only suspend when there's something pending
+    command.keybinds(false) // Suspend
+    onCleanup(() => command.keybinds(true)) // Restore when effect re-runs or unmounts
+  })
+
   command.register(() => [
     ...(sync.data.config.share !== "disabled"
       ? [
@@ -957,6 +1281,8 @@ export function Session() {
         userMessageMarkdown,
         diffWrapMode,
         sync,
+        questionState,
+        sessionID: route.sessionID,
       }}
     >
       <box flexDirection="row">
@@ -1080,17 +1406,25 @@ export function Session() {
               </For>
             </scrollbox>
             <box flexShrink={0}>
-              <Prompt
-                ref={(r) => {
-                  prompt = r
-                  promptRef.set(r)
-                }}
-                disabled={permissions().length > 0}
-                onSubmit={() => {
-                  toBottom()
-                }}
-                sessionID={route.sessionID}
-              />
+              <Show when={permissions().length === 0 && userQuestions().length === 0}>
+                <Prompt
+                  ref={(r) => {
+                    prompt = r
+                    promptRef.set(r)
+                  }}
+                  onSubmit={() => {
+                    toBottom()
+                  }}
+                  sessionID={route.sessionID}
+                />
+              </Show>
+              <Show when={permissions().length > 0 || userQuestions().length > 0}>
+                <box backgroundColor={theme.backgroundElement} paddingLeft={2} paddingRight={1} paddingTop={1} paddingBottom={1}>
+                  <text fg={theme.textMuted}>
+                    {"↑↓ Select  Tab/→ Next  Shift+Tab/← Prev  Enter Confirm  Esc Cancel"}
+                  </text>
+                </box>
+              </Show>
             </box>
             <Show when={!sidebarVisible()}>
               <Footer />
@@ -1357,7 +1691,8 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
 
 function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMessage }) {
   const { theme } = useTheme()
-  const { showDetails } = use()
+  const ctx = use()
+  const { showDetails } = ctx
   const sync = useSync()
   const [margin, setMargin] = createSignal(0)
   const component = createMemo(() => {
@@ -1366,7 +1701,8 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
     const shouldHide =
       !showDetails() &&
       props.part.state.status === "completed" &&
-      !sync.data.permission[props.message.sessionID]?.some((x) => x.callID === props.part.callID)
+      !sync.data.permission[props.message.sessionID]?.some((x) => x.callID === props.part.callID) &&
+      !sync.data.userQuestion[props.message.sessionID]?.some((x) => x.callID === props.part.callID)
 
     if (shouldHide) {
       return undefined
@@ -1381,10 +1717,18 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
     const permissionIndex = permissions.findIndex((x) => x.callID === props.part.callID)
     const permission = permissions[permissionIndex]
 
+    const userQuestions = sync.data.userQuestion[props.message.sessionID] ?? []
+    const userQuestionIndex = userQuestions.findIndex((x) => x.callID === props.part.callID)
+    const userQuestion = userQuestions[userQuestionIndex]
+    const isActiveQuestion = userQuestionIndex === 0
+
+    const hasInteraction = permission || userQuestion
+    const isActiveInteraction = permissionIndex === 0 || isActiveQuestion
+
     const style: BoxProps =
-      container === "block" || permission
+      container === "block" || hasInteraction
         ? {
-            border: permissionIndex === 0 ? (["left", "right"] as const) : (["left"] as const),
+            border: isActiveInteraction ? (["left", "right"] as const) : (["left"] as const),
             paddingTop: 1,
             paddingBottom: 1,
             paddingLeft: 2,
@@ -1392,7 +1736,7 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
             gap: 1,
             backgroundColor: theme.backgroundPanel,
             customBorderChars: SplitBorder.customBorderChars,
-            borderColor: permissionIndex === 0 ? theme.warning : theme.background,
+            borderColor: isActiveInteraction ? theme.warning : theme.background,
           }
         : {
             paddingLeft: 3,
@@ -1457,11 +1801,167 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
             </box>
           </box>
         )}
+        {userQuestion && isActiveQuestion && (
+          <InlineUserQuestion info={userQuestion} />
+        )}
       </box>
     )
   })
 
   return <Show when={component()}>{component()}</Show>
+}
+
+function InlineUserQuestion(props: {
+  info: UserQuestion.Info
+}) {
+  const { theme } = useTheme()
+  const ctx = use() // Get context directly to establish reactive dependency
+  // Use createMemo to properly track questionState changes
+  const state = createMemo(() => ctx.questionState())
+  const questions = props.info.questions
+  const totalTabs = questions.length + 1 // +1 for submit tab
+  const isSubmitTab = createMemo(() => state().currentTab >= questions.length)
+  const currentQuestion = createMemo(() => questions[state().currentTab])
+  const currentAnswer = createMemo(() => state().answers[state().currentTab])
+
+  return (
+    <box flexDirection="column" gap={1}>
+      {/* Tab bar */}
+      <box flexDirection="row">
+        <text fg={theme.textMuted}>{"← "}</text>
+        <For each={questions}>
+          {(q, i) => {
+            const isActive = createMemo(() => state().currentTab === i())
+            const isAnswered = createMemo(() => state().answers[i()] !== undefined)
+            return (
+              <box backgroundColor={isActive() ? theme.warning : undefined}>
+                <text fg={isActive() ? theme.text : theme.textMuted}>
+                  {` ${isAnswered() ? "☒" : "□"} ${q.header} `}
+                </text>
+              </box>
+            )
+          }}
+        </For>
+        <box backgroundColor={isSubmitTab() ? theme.warning : undefined}>
+          <text fg={isSubmitTab() ? theme.text : theme.textMuted}>
+            {" ✓ Submit "}
+          </text>
+        </box>
+        <text fg={theme.textMuted}>{" →"}</text>
+      </box>
+
+      {/* Question content or Submit view */}
+      <Show
+        when={!isSubmitTab() && currentQuestion()}
+        fallback={
+          <box flexDirection="column" gap={1}>
+            <text fg={theme.text}>
+              <b>Review your answers</b>
+            </text>
+            <Show when={Object.keys(state().answers).length < questions.length}>
+              <text fg={theme.warning}>⚠ You have not answered all questions</text>
+            </Show>
+            <For each={questions}>
+              {(q, i) => {
+                const answer = createMemo(() => state().answers[i()])
+                const selectedLabels = createMemo(() =>
+                  answer()?.selectedIndices
+                    ?.map((idx) => q.options[idx]?.label)
+                    .filter(Boolean) ?? []
+                )
+                const parts = createMemo(() => {
+                  const labels = [...selectedLabels()]
+                  if (answer()?.customText) {
+                    labels.push(answer()!.customText!)
+                  }
+                  return labels
+                })
+                return (
+                  <box>
+                    <text fg={theme.text}>
+                      {"● "}{q.header}: {q.question}
+                    </text>
+                    <text fg={theme.textMuted}>
+                      {"  → "}{parts().length > 0 ? parts().join(", ") : "(no selection)"}
+                    </text>
+                  </box>
+                )
+              }}
+            </For>
+            <box flexDirection="row" gap={2} marginTop={1}>
+              <text fg={state().focusedOption === 0 ? theme.text : theme.textMuted}>
+                {state().focusedOption === 0 ? "› " : "  "}
+                <b>1.</b> Submit answers
+              </text>
+              <text fg={state().focusedOption === 1 ? theme.text : theme.textMuted}>
+                {state().focusedOption === 1 ? "› " : "  "}
+                <b>2.</b> Cancel
+              </text>
+            </box>
+          </box>
+        }
+      >
+        <box flexDirection="column" gap={1}>
+          <text fg={theme.text}>{currentQuestion()?.question}</text>
+          <Show when={currentQuestion()?.multiSelect}>
+            <text fg={theme.textMuted}>(Select multiple with Enter, Tab to continue)</text>
+          </Show>
+          <For each={currentQuestion()?.options}>
+            {(opt, i) => {
+              const isFocused = createMemo(() => state().focusedOption === i())
+              const isSelected = createMemo(() => currentAnswer()?.selectedIndices?.includes(i()) ?? false)
+              return (
+                <box>
+                  <text fg={isFocused() ? theme.text : (isSelected() ? theme.text : theme.textMuted)}>
+                    {isFocused() ? "› " : "  "}
+                    <b>{i() + 1}.</b>{" "}
+                    {currentQuestion()?.multiSelect ? (
+                      isSelected() ? <span style={{ fg: "green" }}>[✓] </span> : "[ ] "
+                    ) : (
+                      isSelected() ? <span style={{ fg: "green" }}>● </span> : "○ "
+                    )}
+                    {opt.label}
+                  </text>
+                  <text fg={theme.textMuted} paddingLeft={5}>
+                    {opt.description}
+                  </text>
+                </box>
+              )
+            }}
+          </For>
+          {/* Custom text option */}
+          <box>
+            <text
+              fg={state().focusedOption === (currentQuestion()?.options.length ?? 0) ? theme.text : theme.textMuted}
+            >
+              {state().focusedOption === (currentQuestion()?.options.length ?? 0) ? "› " : "  "}
+              <b>{(currentQuestion()?.options.length ?? 0) + 1}.</b>{" "}
+              {state().isTypingCustom ? (
+                <span>
+                  {state().customText}
+                  <span style={{ backgroundColor: theme.text }}>{" "}</span>
+                </span>
+              ) : currentAnswer()?.customText ? (
+                <span>
+                  <span style={{ fg: "green" }}>{"✎ "}</span>
+                  <span style={{ fg: theme.text }}>{currentAnswer()!.customText}</span>
+                </span>
+              ) : (
+                <span style={{ fg: theme.textMuted }}>
+                  {"Type something..."}
+                </span>
+              )}
+            </text>
+          </box>
+        </box>
+      </Show>
+
+      {/* Instructions */}
+      <text fg={theme.textMuted}>
+        {"↑↓ navigate · Enter select · Tab/←→ switch · Esc cancel"}
+      </text>
+    </box>
+  )
 }
 
 type ToolProps<T extends Tool.Info> = {

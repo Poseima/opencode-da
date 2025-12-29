@@ -1,0 +1,23 @@
+Initialize Data File Metadata Tool (数据文件元数据初始化工具)
+
+PURPOSE: Generate comprehensive metadata for data files using LLM semantic analysis and statistical assessments.
+
+WHEN TO USE:
+- Before processing a data file that doesn't have corresponding metadata
+- When you need to understand a dataset's structure and column semantics
+- To get cohesiveness hints for deciding which columns need clustering
+
+WHEN NOT TO USE:
+- File already has corresponding _metadata.json (tool will skip and return existing path)
+- File is not a tabular data file (CSV/Excel)
+
+METADATA OUTPUT STRUCTURE follows the same structure in <data file metadata interface>
+
+COHESIVENESS CALCULATION:
+- High Cohesiveness: uniqueCount < 30 AND top 3 values cover > 20% of data
+- Low Cohesiveness: Otherwise (suggests need for clustering/aggregation if you need to aggregate semantic theme on it)
+
+USAGE PATTERN:
+1. Call init_data_metadata on new data files before processing
+2. Read the generated metadata to understand file purpose, structure and column semantics
+3. Check clusteringHint to decide if keyword_clustering or semantic_clustering is needed

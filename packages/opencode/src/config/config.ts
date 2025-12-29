@@ -671,6 +671,18 @@ export namespace Config {
         .string()
         .describe("Small model to use for tasks like title generation in the format of provider/model")
         .optional(),
+      llm_tool_model: z
+        .string()
+        .describe("Model to use for LLM-powered tools (like llm_calculator) in the format of provider/model")
+        .optional(),
+      semantic_clustering_model: z
+        .string()
+        .describe("Model to use for semantic clustering tool in the format of provider/model")
+        .optional(),
+      keyword_clustering_model: z
+        .string()
+        .describe("Model to use for keyword clustering tool in the format of provider/model")
+        .optional(),
       default_agent: z
         .string()
         .optional()
@@ -773,6 +785,10 @@ export namespace Config {
         })
         .optional(),
       tools: z.record(z.string(), z.boolean()).optional(),
+      python_path: z
+        .string()
+        .optional()
+        .describe("Python interpreter path to use for Python commands (e.g., from a conda environment)"),
       enterprise: z
         .object({
           url: z.string().optional().describe("Enterprise URL"),

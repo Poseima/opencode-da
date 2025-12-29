@@ -16,6 +16,7 @@ import type {
   ProviderAuthMethod,
   VcsInfo,
 } from "@opencode-ai/sdk/v2"
+import type { UserQuestion } from "@/user-question"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useSDK } from "@tui/context/sdk"
 import { Binary } from "@opencode-ai/util/binary"
@@ -40,6 +41,9 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       command: Command[]
       permission: {
         [sessionID: string]: Permission[]
+      }
+      userQuestion: {
+        [sessionID: string]: UserQuestion.Info[]
       }
       config: Config
       session: Session[]
@@ -76,6 +80,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       status: "loading",
       agent: [],
       permission: {},
+      userQuestion: {},
       command: [],
       provider: [],
       provider_default: {},
@@ -95,36 +100,78 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     const sdk = useSDK()
 
     sdk.event.listen((e) => {
-      const event = e.details
-      switch (event.type) {
+      const event = e.details as { type: string; properties: any }
+
+      // Handle userquestion events (not in SDK types yet)
+      if (event.type === "userquestion.asked") {
+        const props = event.properties as UserQuestion.Info
+        Log.Default.info("[SYNC] userquestion.asked", { id: props.id, sessionID: props.sessionID, questionsCount: props.questions?.length })
+        const questions = store.userQuestion[props.sessionID]
+        if (!questions) {
+          setStore("userQuestion", props.sessionID, [props])
+        } else {
+          setStore(
+            "userQuestion",
+            props.sessionID,
+            produce((draft) => {
+              draft.push(props)
+            }),
+          )
+        }
+        Log.Default.info("[SYNC] after userquestion.asked, store has", { count: store.userQuestion[props.sessionID]?.length })
+        return
+      }
+
+      if (event.type === "userquestion.answered") {
+        const props = event.properties as { id: string; sessionID: string }
+        Log.Default.info("[SYNC] userquestion.answered", { id: props.id, sessionID: props.sessionID })
+        const questions = store.userQuestion[props.sessionID]
+        Log.Default.info("[SYNC] before remove, questions count", { count: questions?.length })
+        if (!questions) return
+        const match = questions.findIndex((q) => q.id === props.id)
+        if (match < 0) return
+        setStore(
+          "userQuestion",
+          props.sessionID,
+          produce((draft) => {
+            draft.splice(match, 1)
+          }),
+        )
+        Log.Default.info("[SYNC] after remove, questions count", { count: store.userQuestion[props.sessionID]?.length })
+        return
+      }
+
+      // Type assertion for the switch
+      const typedEvent = event as typeof e.details
+      switch (typedEvent.type) {
         case "permission.updated": {
-          const permissions = store.permission[event.properties.sessionID]
+          const permissions = store.permission[typedEvent.properties.sessionID]
           if (!permissions) {
-            setStore("permission", event.properties.sessionID, [event.properties])
+            setStore("permission", typedEvent.properties.sessionID, [typedEvent.properties])
             break
           }
-          const match = Binary.search(permissions, event.properties.id, (p) => p.id)
+          const match = Binary.search(permissions, typedEvent.properties.id, (p) => p.id)
           setStore(
             "permission",
-            event.properties.sessionID,
+            typedEvent.properties.sessionID,
             produce((draft) => {
               if (match.found) {
-                draft[match.index] = event.properties
+                draft[match.index] = typedEvent.properties
                 return
               }
-              draft.push(event.properties)
+              draft.push(typedEvent.properties)
             }),
           )
           break
         }
 
         case "permission.replied": {
-          const permissions = store.permission[event.properties.sessionID]
-          const match = Binary.search(permissions, event.properties.permissionID, (p) => p.id)
+          const permissions = store.permission[typedEvent.properties.sessionID]
+          const match = Binary.search(permissions, typedEvent.properties.permissionID, (p) => p.id)
           if (!match.found) break
           setStore(
             "permission",
-            event.properties.sessionID,
+            typedEvent.properties.sessionID,
             produce((draft) => {
               draft.splice(match.index, 1)
             }),
@@ -133,15 +180,15 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         }
 
         case "todo.updated":
-          setStore("todo", event.properties.sessionID, event.properties.todos)
+          setStore("todo", typedEvent.properties.sessionID, typedEvent.properties.todos)
           break
 
         case "session.diff":
-          setStore("session_diff", event.properties.sessionID, event.properties.diff)
+          setStore("session_diff", typedEvent.properties.sessionID, typedEvent.properties.diff)
           break
 
         case "session.deleted": {
-          const result = Binary.search(store.session, event.properties.info.id, (s) => s.id)
+          const result = Binary.search(store.session, typedEvent.properties.info.id, (s) => s.id)
           if (result.found) {
             setStore(
               "session",
@@ -153,53 +200,53 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           break
         }
         case "session.updated": {
-          const result = Binary.search(store.session, event.properties.info.id, (s) => s.id)
+          const result = Binary.search(store.session, typedEvent.properties.info.id, (s) => s.id)
           if (result.found) {
-            setStore("session", result.index, reconcile(event.properties.info))
+            setStore("session", result.index, reconcile(typedEvent.properties.info))
             break
           }
           setStore(
             "session",
             produce((draft) => {
-              draft.splice(result.index, 0, event.properties.info)
+              draft.splice(result.index, 0, typedEvent.properties.info)
             }),
           )
           break
         }
 
         case "session.status": {
-          setStore("session_status", event.properties.sessionID, event.properties.status)
+          setStore("session_status", typedEvent.properties.sessionID, typedEvent.properties.status)
           break
         }
 
         case "message.updated": {
-          const messages = store.message[event.properties.info.sessionID]
+          const messages = store.message[typedEvent.properties.info.sessionID]
           if (!messages) {
-            setStore("message", event.properties.info.sessionID, [event.properties.info])
+            setStore("message", typedEvent.properties.info.sessionID, [typedEvent.properties.info])
             break
           }
-          const result = Binary.search(messages, event.properties.info.id, (m) => m.id)
+          const result = Binary.search(messages, typedEvent.properties.info.id, (m) => m.id)
           if (result.found) {
-            setStore("message", event.properties.info.sessionID, result.index, reconcile(event.properties.info))
+            setStore("message", typedEvent.properties.info.sessionID, result.index, reconcile(typedEvent.properties.info))
             break
           }
           setStore(
             "message",
-            event.properties.info.sessionID,
+            typedEvent.properties.info.sessionID,
             produce((draft) => {
-              draft.splice(result.index, 0, event.properties.info)
+              draft.splice(result.index, 0, typedEvent.properties.info)
               if (draft.length > 100) draft.shift()
             }),
           )
           break
         }
         case "message.removed": {
-          const messages = store.message[event.properties.sessionID]
-          const result = Binary.search(messages, event.properties.messageID, (m) => m.id)
+          const messages = store.message[typedEvent.properties.sessionID]
+          const result = Binary.search(messages, typedEvent.properties.messageID, (m) => m.id)
           if (result.found) {
             setStore(
               "message",
-              event.properties.sessionID,
+              typedEvent.properties.sessionID,
               produce((draft) => {
                 draft.splice(result.index, 1)
               }),
@@ -208,33 +255,33 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           break
         }
         case "message.part.updated": {
-          const parts = store.part[event.properties.part.messageID]
+          const parts = store.part[typedEvent.properties.part.messageID]
           if (!parts) {
-            setStore("part", event.properties.part.messageID, [event.properties.part])
+            setStore("part", typedEvent.properties.part.messageID, [typedEvent.properties.part])
             break
           }
-          const result = Binary.search(parts, event.properties.part.id, (p) => p.id)
+          const result = Binary.search(parts, typedEvent.properties.part.id, (p) => p.id)
           if (result.found) {
-            setStore("part", event.properties.part.messageID, result.index, reconcile(event.properties.part))
+            setStore("part", typedEvent.properties.part.messageID, result.index, reconcile(typedEvent.properties.part))
             break
           }
           setStore(
             "part",
-            event.properties.part.messageID,
+            typedEvent.properties.part.messageID,
             produce((draft) => {
-              draft.splice(result.index, 0, event.properties.part)
+              draft.splice(result.index, 0, typedEvent.properties.part)
             }),
           )
           break
         }
 
         case "message.part.removed": {
-          const parts = store.part[event.properties.messageID]
-          const result = Binary.search(parts, event.properties.partID, (p) => p.id)
+          const parts = store.part[typedEvent.properties.messageID]
+          const result = Binary.search(parts, typedEvent.properties.partID, (p) => p.id)
           if (result.found)
             setStore(
               "part",
-              event.properties.messageID,
+              typedEvent.properties.messageID,
               produce((draft) => {
                 draft.splice(result.index, 1)
               }),
@@ -248,7 +295,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         }
 
         case "vcs.branch.updated": {
-          setStore("vcs", { branch: event.properties.branch })
+          setStore("vcs", { branch: typedEvent.properties.branch })
           break
         }
       }

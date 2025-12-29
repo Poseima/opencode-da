@@ -4,6 +4,9 @@
   // "enterprise": {
   //   "url": "https://enterprise.dev.opencode.ai",
   // },
+  "llm_tool_model": "opencode/grok-code",
+  "semantic_clustering_model": "opencode/grok-code",
+  "keyword_clustering_model": "opencode/grok-code",
   "instructions": ["STYLE_GUIDE.md"],
   "provider": {
     "opencode": {

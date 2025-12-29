@@ -4,7 +4,7 @@ import { Filesystem } from "../util/filesystem"
 import { Config } from "../config/config"
 import { Skill } from "../skill"
 
-import { Instance } from "../project/instance"
+import { Instance, getEffectiveDirectory } from "../project/instance"
 import path from "path"
 import os from "os"
 
@@ -36,11 +36,12 @@ export namespace SystemPrompt {
 
   export async function environment() {
     const project = Instance.project
+    const effectiveDir = getEffectiveDirectory()
     return [
       [
         `Here is some useful information about the environment you are running in:`,
         `<env>`,
-        `  Working directory: ${Instance.directory}`,
+        `  Working directory: ${effectiveDir}`,
         `  Is directory a git repo: ${project.vcs === "git" ? "yes" : "no"}`,
         `  Platform: ${process.platform}`,
         `  Today's date: ${new Date().toDateString()}`,
@@ -49,7 +50,7 @@ export namespace SystemPrompt {
         `  ${
           project.vcs === "git"
             ? await Ripgrep.tree({
-                cwd: Instance.directory,
+                cwd: effectiveDir,
                 limit: 200,
               })
             : ""
@@ -73,8 +74,9 @@ export namespace SystemPrompt {
     const config = await Config.get()
     const paths = new Set<string>()
 
+    const effectiveDir = getEffectiveDirectory()
     for (const localRuleFile of LOCAL_RULE_FILES) {
-      const matches = await Filesystem.findUp(localRuleFile, Instance.directory, Instance.worktree)
+      const matches = await Filesystem.findUp(localRuleFile, effectiveDir, Instance.worktree)
       if (matches.length > 0) {
         matches.forEach((path) => paths.add(path))
         break
@@ -103,7 +105,7 @@ export namespace SystemPrompt {
             }),
           ).catch(() => [])
         } else {
-          matches = await Filesystem.globUp(instruction, Instance.directory, Instance.worktree).catch(() => [])
+          matches = await Filesystem.globUp(instruction, effectiveDir, Instance.worktree).catch(() => [])
         }
         matches.forEach((path) => paths.add(path))
       }

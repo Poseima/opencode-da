@@ -3,7 +3,7 @@ import { spawn } from "child_process"
 import { Tool } from "./tool"
 import DESCRIPTION from "./bash.txt"
 import { Log } from "../util/log"
-import { Instance } from "../project/instance"
+import { Instance, getEffectiveDirectory } from "../project/instance"
 import { lazy } from "@/util/lazy"
 import { Language } from "web-tree-sitter"
 import { Agent } from "@/agent/agent"
@@ -15,6 +15,7 @@ import { fileURLToPath } from "url"
 import { Flag } from "@/flag/flag.ts"
 import path from "path"
 import { Shell } from "@/shell/shell"
+import { Config } from "@/config/config"
 
 const MAX_OUTPUT_LENGTH = Flag.OPENCODE_EXPERIMENTAL_BASH_MAX_OUTPUT_LENGTH || 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
@@ -72,7 +73,7 @@ export const BashTool = Tool.define("bash", async () => {
         ),
     }),
     async execute(params, ctx) {
-      const cwd = params.workdir || Instance.directory
+      const cwd = params.workdir || getEffectiveDirectory()
       if (params.timeout !== undefined && params.timeout < 0) {
         throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
       }
@@ -84,8 +85,9 @@ export const BashTool = Tool.define("bash", async () => {
       const agent = await Agent.get(ctx.agent)
 
       const checkExternalDirectory = async (dir: string) => {
-        if (Filesystem.contains(Instance.directory, dir)) return
-        const title = `This command references paths outside of ${Instance.directory}`
+        const effectiveDir = getEffectiveDirectory()
+        if (Filesystem.contains(effectiveDir, dir)) return
+        const title = `This command references paths outside of ${effectiveDir}`
         if (agent.permission.external_directory === "ask") {
           await Permission.ask({
             type: "external_directory",
@@ -195,12 +197,18 @@ export const BashTool = Tool.define("bash", async () => {
         })
       }
 
+      // Build environment with optional Python path prepended
+      const config = await Config.get()
+      const env = { ...process.env }
+      if (config.python_path) {
+        const pythonDir = path.dirname(config.python_path)
+        env.PATH = `${pythonDir}${path.delimiter}${env.PATH || ""}`
+      }
+
       const proc = spawn(params.command, {
         shell,
         cwd,
-        env: {
-          ...process.env,
-        },
+        env,
         stdio: ["ignore", "pipe", "pipe"],
         detached: process.platform !== "win32",
       })

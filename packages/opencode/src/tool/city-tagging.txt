@@ -1,0 +1,34 @@
+City Name Standardization and Enrichment Tool (城市标签工具).
+
+PURPOSE: Match city names against a predefined configuration and enrich data with standardized city, province, tier, and region fields.
+
+WHEN TO USE:
+- User has data containing city names that need standardization
+- Need to add geographic metadata (province, city tier, region)
+- City names may be in various forms (aliases, abbreviations, traditional/simplified Chinese)
+
+WHEN NOT TO USE:
+- Data does not contain city names
+- Need to match countries or regions outside China
+- Need custom city configurations (this tool uses a fixed configuration of 740+ Chinese cities)
+
+OUTPUT FILES:
+- Main output: {base}_城市标签明细表.{ext}
+- Metadata: {base}_城市标签明细表_metadata.json
+
+OUTPUT COLUMNS:
+- standardized_city: Standardized city name (e.g., "北京市")
+- standardized_province: Province name (e.g., "北京市", "广东省")
+- standardized_city_tier: City tier classification (一线城市/新一线城市/二线城市/三线城市/四线城市/五线城市)
+- standardized_geo_region: Geographic region (华北地区/华东地区/华南地区/华中地区/西南地区/西北地区/东北地区)
+
+BEHAVIOR:
+- Matches longest patterns first to avoid ambiguity (e.g., "北京" matched before "京")
+- Supports city name aliases and abbreviations (e.g., "帝都" → "北京市", "沪" → "上海市")
+- One row can match multiple cities → exploded to multiple rows
+- Unmatched rows are preserved with empty standardized fields
+- Primary key column is preserved for traceability
+
+EXAMPLE:
+Input: file with "city" column containing "我住在北京和上海"
+Output: Two rows, one for 北京市 and one for 上海市, with full geographic metadata

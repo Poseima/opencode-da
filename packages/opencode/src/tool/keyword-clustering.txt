@@ -1,0 +1,73 @@
+LLM-powered Keyword-Based Label Assignment Tool with Iterative Optimization (关键词打标工具).
+
+PURPOSE: Generate labels for text data WITHOUT hierarchical structure using keyword matching. Faster than semantic tool, however, less accurate semantically.
+Best for: unique values >= 300, or when basic cleaning and standardization is sufficient.
+
+WHEN TO USE:
+- Target column has "Low Cohesiveness" (many diverse values needing standardization)
+- Analytical objective explicitly requires keyword-based clustering or classification
+- Large datasets where semantic processing would be too slow
+- Need reproducible, transparent keyword-based matching rules
+
+WHEN NOT TO USE:
+- When you requires hierarchical structure in the labels. please run multiple tool calls independently if you really need it.
+- Target column has "High Cohesiveness" (already clean, standardized values)
+- Deep semantic understanding is required (use semantic_clustering instead)
+- unique values < 300 and semantic nuance matters
+
+WHAT IT DOES:
+- LLM generates comprehensive keyword configurations for each label
+- Fast TypeScript-based keyword matching (NO LLM during classification phase)
+- Iterative optimization: if coverage < target, LLM generates supplementary keywords
+- Supports multi-label assignment (one item can match multiple labels)
+- Single-layer labels only; for multi-dimension/hierarchical labels, call multiple times
+
+OUTPUT FILES (2 files per call):
+1. {{outputFile}}: Detail table with columns [clusterColumns, outputLabelColumn, user_id]
+2. {{outputFile}}_关键词配置表.csv: Keyword config [label_name, keywords, keyword_count]
+
+CRITICAL BEHAVIORS:
+- OUTPUT ONLY KEEPS: clusterColumns + outputLabelColumn + user_id. Other columns are LOST! Merge back if needed.
+- Multi-label items are EXPLODED (one row becomes multiple rows). Use user_id to join back to original data.
+- Empty responses marked as "受访者未回答", non-empty unmatched marked as "其他"
+
+Parameters:
+- clusterObjective: The labeling goal (e.g., "对用户反馈进行标签分类")
+- inputFile: Input CSV or Excel file path
+- clusterColumns: Column names to label on
+- outputFile: Output CSV or Excel file path
+- outputLabelColumn: Column name for output labels
+- additionalRequirements: (Optional) Additional labeling requirements
+- targetCoverage: (Optional) Target coverage rate 0-1, default 0.9 = 90%
+- iterativeRounds: (Optional) Max iterations for optimization, default 3
+- preDefinedCategories: (Optional) Pre-defined categories - see detailed section below
+
+PRE-DEFINED CATEGORIES (preDefinedCategories):
+Use to constrain labeling to specific categories with optional keywords.
+
+Scenarios:
+1. Labels + Keywords provided:
+   - LLM keyword generation SKIPPED
+   - Your keywords used directly for substring matching
+   - Fastest option, full control over matching
+
+2. Labels + Definitions (no keywords):
+   - LLM generates keywords based on definitions
+   - Keywords extrapolated from your definitions
+   - Use when you want specific labels but LLM-generated keywords
+
+3. Labels only:
+   - LLM generates keywords from label names
+   - Less precise than providing definitions
+
+Example with keywords (fastest):
+preDefinedCategories: [
+  { label: "产品质量", keywords: ["质量", "做工", "材料", "品质"] },
+  { label: "价格", keywords: ["价格", "价位", "便宜", "贵", "性价比"] }
+]
+
+Example with definitions (LLM generates keywords):
+preDefinedCategories: [
+  { label: "产品质量", definition: "关于产品质量、做工、材料的反馈" },
+  { label: "价格", definition: "关于价格、性价比的反馈" }
+]

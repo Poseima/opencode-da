@@ -20,6 +20,7 @@ import { DialogSelectModel } from "@/components/dialog-select-model"
 import { DialogSelectModelUnpaid } from "@/components/dialog-select-model-unpaid"
 import { useProviders } from "@/hooks/use-providers"
 import { useCommand } from "@/context/command"
+import { showToast } from "@opencode-ai/ui/toast"
 import { persisted } from "@/utils/persist"
 import { Identifier } from "@/utils/id"
 import { SessionContextUsage } from "@/components/session-context-usage"
@@ -811,6 +812,47 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     if (text.startsWith("/")) {
       const [cmdName, ...args] = text.split(" ")
       const commandName = cmdName.slice(1)
+
+      // Handle /conda_env command
+      if (commandName === "conda_env") {
+        const envName = args.join(" ").trim()
+        if (!envName) {
+          showToast({
+            title: "Missing environment name",
+            description: "Usage: /conda_env <environment_name>",
+          })
+          return
+        }
+        try {
+          const response = await fetch(`${sdk.url}/config/conda-env`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: envName }),
+          })
+          if (response.ok) {
+            const result = await response.json()
+            showToast({
+              title: "Conda environment set",
+              description: `Python path: ${result.python_path}`,
+            })
+          } else {
+            const error = await response.json()
+            showToast({
+              title: "Failed to set conda environment",
+              description: error.message || `Environment '${envName}' not found`,
+            })
+          }
+        } catch (e) {
+          showToast({
+            title: "Failed to set conda environment",
+            description: e instanceof Error ? e.message : "Unknown error",
+          })
+        }
+        editorRef.innerHTML = ""
+        prompt.set([{ type: "text", content: "", start: 0, end: 0 }], 0)
+        return
+      }
+
       const customCommand = sync.data.command.find((c) => c.name === commandName)
       if (customCommand) {
         sdk.client.session.command({

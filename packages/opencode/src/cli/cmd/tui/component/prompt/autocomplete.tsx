@@ -340,6 +340,28 @@ export function Autocomplete(props: {
         onSelect: () => command.trigger("provider.connect"),
       },
       {
+        display: "/conda_env",
+        description: "set conda environment (type: /conda_env <name>)",
+        onSelect: () => {
+          const newText = "/conda_env "
+          const cursor = props.input().logicalCursor
+          props.input().deleteRange(0, 0, cursor.row, cursor.col)
+          props.input().insertText(newText)
+          props.input().cursorOffset = Bun.stringWidth(newText)
+        },
+      },
+      {
+        display: "/switch_base",
+        description: "switch base directory (type: /switch_base <abs_path>)",
+        onSelect: () => {
+          const newText = "/switch_base "
+          const cursor = props.input().logicalCursor
+          props.input().deleteRange(0, 0, cursor.row, cursor.col)
+          props.input().insertText(newText)
+          props.input().cursorOffset = Bun.stringWidth(newText)
+        },
+      },
+      {
         display: "/help",
         description: "show help",
         onSelect: () => command.trigger("help.show"),
